@@ -16,10 +16,13 @@ client = TelegramClient('anon', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 async def is_user_admin(user_id, chat_id):
     """Sprawdza, czy dany użytkownik jest administratorem w podanej grupie."""
     admin_list = await client.get_participants(chat_id, filter=ChannelParticipantsAdmins)
-    for admin in admin_list:
-        if admin.id == user_id:
-            return True
-    return False
+    return user_id in [admin.id for admin in admin_list]
+
+
+async def get_admins(chat_id):
+    """Zwraca listę ID administratorów w podanej grupie."""
+    admin_list = await client.get_participants(chat_id, filter=ChannelParticipantsAdmins)
+    return [admin.id for admin in admin_list]
 
 
 @client.on(events.NewMessage(pattern='/start'))
@@ -48,8 +51,8 @@ async def record_activity(event):
             json.dump(data, file)
 
 
-@client.on(events.NewMessage(pattern='/show (\d+)'))
-async def show_inactive(event):
+@client.on(events.NewMessage(pattern=r'/show (\d+)|/kick (\d+)|/ban (\d+)'))
+async def process_inactive(event):
     # Sprawdzanie, czy użytkownik jest administratorem
     if not await is_user_admin(event.sender_id, event.chat_id):
         await event.respond("Tylko administratorzy mogą używać tej komendy.")
@@ -57,29 +60,43 @@ async def show_inactive(event):
 
     days = int(event.pattern_match.group(1))
     cutoff_date = datetime.now() - timedelta(days=days)
+    admin_ids = await get_admins(event.chat_id)
 
     with open('activity_data.json', 'r') as file:
         data = json.load(file)
 
-    all_members = [(member.username, member.id) for member in await client.get_participants(event.chat_id)]
+    all_members = [(member.username, member.id) for member in await client.get_participants(event.chat_id) if
+                   member.id not in admin_ids]
     active_members = [(user_data["username"], int(user_id)) for user_id, user_data in data.items() if
-                      datetime.fromisoformat(user_data["last_active"]) > cutoff_date]
+                      datetime.fromisoformat(user_data["last_active"]) > cutoff_date and int(user_id) not in admin_ids]
     inactive_users = set(all_members) - set(active_members)
 
-    msg_lines = [f"{username} (ID: {user_id})" for username, user_id in inactive_users if username]
+    if event.pattern_match.string.startswith("/show"):
+        msg_lines = [f"{username} (ID: {user_id})" for username, user_id in inactive_users if username]
+        if len(msg_lines) > 50:
+            with open(file_path, 'w') as file:
+                file.write("\n".join(msg_lines))
+            await client.send_file(event.sender_id, file_path, caption=f"Użytkownicy nieaktywni od {days} dni:")
+            await event.respond("Wysłałem Ci listę nieaktywnych użytkowników prywatnie.")
+        else:
+            msg = f"Użytkownicy nieaktywni od {days} dni:\n" + "\n".join(msg_lines)
+            await event.respond(msg)
 
-    if len(msg_lines) > 50:
-        # Jeśli jest więcej niż 50 nieaktywnych użytkowników, zapisz ich do pliku tekstowego
-        with open(file_path, 'w') as file:
-            file.write("\n".join(msg_lines))
+    elif event.pattern_match.string.startswith("/kick"):
+        for _, user_id in inactive_users:
+            try:
+                await client.kick_participant(event.chat_id, user_id)
+            except Exception as e:
+                await event.respond(f"Nie mogłem wyrzucić użytkownika o ID {user_id}. Błąd: {e}")
+        await event.respond(f"Wyrzuciłem użytkowników nieaktywnych od {days} dni.")
 
-        # Wyślij plik tekstowy prywatnie do użytkownika, który wpisał komendę
-        await client.send_file(event.sender_id, file_path, caption=f"Użytkownicy nieaktywni od {days} dni:")
-        await event.respond("Wysłałem Ci listę nieaktywnych użytkowników prywatnie.")
-    else:
-        # Jeśli jest mniej lub równo 50 nieaktywnych użytkowników, kontynuuj wysyłanie wiadomości w grupie
-        msg = f"Użytkownicy nieaktywni od {days} dni:\n" + "\n".join(msg_lines)
-        await event.respond(msg)
+    elif event.pattern_match.string.startswith("/ban"):
+        for _, user_id in inactive_users:
+            try:
+                await client.edit_permissions(event.chat_id, user_id, view_messages=False)
+            except Exception as e:
+                await event.respond(f"Nie mogłem zbanować użytkownika o ID {user_id}. Błąd: {e}")
+        await event.respond(f"Zbanowałem użytkowników nieaktywnych od {days} dni.")
 
 
 with client:
