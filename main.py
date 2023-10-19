@@ -25,7 +25,7 @@ async def get_admins(chat_id):
     return [admin.id for admin in admin_list]
 
 
-@client.on(events.NewMessage(pattern='/start'))
+@client.on(events.NewMessage(pattern=r'/start'))
 async def start(event):
     await event.respond('Bot został uruchomiony.')
 
@@ -58,7 +58,16 @@ async def process_inactive(event):
         await event.respond("Tylko administratorzy mogą używać tej komendy.")
         return
 
-    days = int(event.pattern_match.group(1))
+    # Sprawdź, który wzorzec został dopasowany
+    if event.pattern_match.string.startswith("/show"):
+        days = int(event.pattern_match.group(1))
+    elif event.pattern_match.string.startswith("/kick"):
+        days = int(event.pattern_match.group(2))
+    elif event.pattern_match.string.startswith("/ban"):
+        days = int(event.pattern_match.group(3))
+    else:
+        return
+
     cutoff_date = datetime.now() - timedelta(days=days)
     admin_ids = await get_admins(event.chat_id)
 
