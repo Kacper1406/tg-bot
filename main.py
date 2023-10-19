@@ -58,22 +58,6 @@ async def process_inactive(event):
         await event.respond("Tylko administratorzy mogą używać tej komendy.")
         return
 
-    # Wspólna logika do przetwarzania czasu
-    if event.pattern_match.string.startswith("/showinactive"):
-        number = int(event.pattern_match.group(1))
-        unit = event.pattern_match.group(2)
-    elif event.pattern_match.string.startswith("/kickinactive"):
-        number = int(event.pattern_match.group(3))
-        unit = event.pattern_match.group(4)
-    elif event.pattern_match.string.startswith("/baninactive"):
-        number = int(event.pattern_match.group(5))
-        unit = event.pattern_match.group(6)
-
-    if unit == "h":
-        cutoff_date = datetime.now() - timedelta(hours=number)
-    else:  # d
-        cutoff_date = datetime.now() - timedelta(days=number)
-
     admin_ids = await get_admins(event.chat_id)
 
     with open('activity_data.json', 'r') as file:
@@ -81,11 +65,20 @@ async def process_inactive(event):
 
     all_members = [(member.username, member.id) for member in await client.get_participants(event.chat_id) if
                    member.id not in admin_ids]
-    active_members = [(user_data["username"], int(user_id)) for user_id, user_data in data.items() if
-                      datetime.fromisoformat(user_data["last_active"]) > cutoff_date and int(user_id) not in admin_ids]
-    inactive_users = set(all_members) - set(active_members)
 
     if event.pattern_match.string.startswith("/showinactive"):
+        number = int(event.pattern_match.group(1))
+        unit = event.pattern_match.group(2)
+
+        if unit == "h":
+            cutoff_date = datetime.now() - timedelta(hours=number)
+        else:  # d
+            cutoff_date = datetime.now() - timedelta(days=number)
+
+        inactive_users = set(all_members) - set(
+            [(user_data["username"], int(user_id)) for user_id, user_data in data.items() if
+             datetime.fromisoformat(user_data["last_active"]) > cutoff_date])
+
         msg_lines = [f"{username} (ID: {user_id})" for username, user_id in inactive_users if username]
         if len(msg_lines) > 50:
             with open(file_path, 'w') as file:
@@ -97,6 +90,18 @@ async def process_inactive(event):
             await event.respond(msg)
 
     elif event.pattern_match.string.startswith("/kickinactive"):
+        number = int(event.pattern_match.group(3))
+        unit = event.pattern_match.group(4)
+
+        if unit == "h":
+            cutoff_date = datetime.now() - timedelta(hours=number)
+        else:  # d
+            cutoff_date = datetime.now() - timedelta(days=number)
+
+        inactive_users = set(all_members) - set(
+            [(user_data["username"], int(user_id)) for user_id, user_data in data.items() if
+             datetime.fromisoformat(user_data["last_active"]) > cutoff_date])
+
         for _, user_id in inactive_users:
             try:
                 await client.kick_participant(event.chat_id, user_id)
@@ -105,6 +110,18 @@ async def process_inactive(event):
         await event.respond(f"Wyrzuciłem użytkowników nieaktywnych od {number}{unit}.")
 
     elif event.pattern_match.string.startswith("/baninactive"):
+        number = int(event.pattern_match.group(5))
+        unit = event.pattern_match.group(6)
+
+        if unit == "h":
+            cutoff_date = datetime.now() - timedelta(hours=number)
+        else:  # d
+            cutoff_date = datetime.now() - timedelta(days=number)
+
+        inactive_users = set(all_members) - set(
+            [(user_data["username"], int(user_id)) for user_id, user_data in data.items() if
+             datetime.fromisoformat(user_data["last_active"]) > cutoff_date])
+
         for _, user_id in inactive_users:
             try:
                 await client.edit_permissions(event.chat_id, user_id, view_messages=False)
