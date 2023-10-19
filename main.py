@@ -51,24 +51,29 @@ async def record_activity(event):
             json.dump(data, file)
 
 
-@client.on(events.NewMessage(pattern=r'/show (\d+)|/kick (\d+)|/ban (\d+)'))
+@client.on(events.NewMessage(pattern=r'/showinactive (\d+) (h|d)|/kickinactive (\d+) (h|d)|/baninactive (\d+) (h|d)'))
 async def process_inactive(event):
     # Sprawdzanie, czy użytkownik jest administratorem
     if not await is_user_admin(event.sender_id, event.chat_id):
         await event.respond("Tylko administratorzy mogą używać tej komendy.")
         return
 
-    # Sprawdź, który wzorzec został dopasowany
-    if event.pattern_match.string.startswith("/show"):
-        days = int(event.pattern_match.group(1))
-    elif event.pattern_match.string.startswith("/kick"):
-        days = int(event.pattern_match.group(2))
-    elif event.pattern_match.string.startswith("/ban"):
-        days = int(event.pattern_match.group(3))
-    else:
-        return
+    # Wspólna logika do przetwarzania czasu
+    if event.pattern_match.string.startswith("/showinactive"):
+        number = int(event.pattern_match.group(1))
+        unit = event.pattern_match.group(2)
+    elif event.pattern_match.string.startswith("/kickinactive"):
+        number = int(event.pattern_match.group(3))
+        unit = event.pattern_match.group(4)
+    elif event.pattern_match.string.startswith("/baninactive"):
+        number = int(event.pattern_match.group(5))
+        unit = event.pattern_match.group(6)
 
-    cutoff_date = datetime.now() - timedelta(days=days)
+    if unit == "h":
+        cutoff_date = datetime.now() - timedelta(hours=number)
+    else:  # d
+        cutoff_date = datetime.now() - timedelta(days=number)
+
     admin_ids = await get_admins(event.chat_id)
 
     with open('activity_data.json', 'r') as file:
@@ -80,32 +85,32 @@ async def process_inactive(event):
                       datetime.fromisoformat(user_data["last_active"]) > cutoff_date and int(user_id) not in admin_ids]
     inactive_users = set(all_members) - set(active_members)
 
-    if event.pattern_match.string.startswith("/show"):
+    if event.pattern_match.string.startswith("/showinactive"):
         msg_lines = [f"{username} (ID: {user_id})" for username, user_id in inactive_users if username]
         if len(msg_lines) > 50:
             with open(file_path, 'w') as file:
                 file.write("\n".join(msg_lines))
-            await client.send_file(event.sender_id, file_path, caption=f"Użytkownicy nieaktywni od {days} dni:")
+            await client.send_file(event.sender_id, file_path, caption=f"Użytkownicy nieaktywni od {number}{unit}:")
             await event.respond("Wysłałem Ci listę nieaktywnych użytkowników prywatnie.")
         else:
-            msg = f"Użytkownicy nieaktywni od {days} dni:\n" + "\n".join(msg_lines)
+            msg = f"Użytkownicy nieaktywni od {number}{unit}:\n" + "\n".join(msg_lines)
             await event.respond(msg)
 
-    elif event.pattern_match.string.startswith("/kick"):
+    elif event.pattern_match.string.startswith("/kickinactive"):
         for _, user_id in inactive_users:
             try:
                 await client.kick_participant(event.chat_id, user_id)
             except Exception as e:
                 await event.respond(f"Nie mogłem wyrzucić użytkownika o ID {user_id}. Błąd: {e}")
-        await event.respond(f"Wyrzuciłem użytkowników nieaktywnych od {days} dni.")
+        await event.respond(f"Wyrzuciłem użytkowników nieaktywnych od {number}{unit}.")
 
-    elif event.pattern_match.string.startswith("/ban"):
+    elif event.pattern_match.string.startswith("/baninactive"):
         for _, user_id in inactive_users:
             try:
                 await client.edit_permissions(event.chat_id, user_id, view_messages=False)
             except Exception as e:
                 await event.respond(f"Nie mogłem zbanować użytkownika o ID {user_id}. Błąd: {e}")
-        await event.respond(f"Zbanowałem użytkowników nieaktywnych od {days} dni.")
+        await event.respond(f"Zbanowałem użytkowników nieaktywnych od {number}{unit}.")
 
 
 with client:
