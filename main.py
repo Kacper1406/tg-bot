@@ -21,9 +21,47 @@ async def is_user_admin(user_id, chat_id):
     return any(admin.id == user_id for admin in admin_list)
 
 
-@client.on(events.NewMessage(pattern=r'/showinactive (\d+)(h|d)'))
-@client.on(events.NewMessage(pattern=r'/kickinactive (\d+)(h|d)'))
-@client.on(events.NewMessage(pattern=r'/baninactive (\d+)(h|d)'))
+async def get_admins(chat_id):
+    """Zwraca listę ID administratorów w podanej grupie."""
+    admin_list = await client.get_participants(chat_id, filter=ChannelParticipantsAdmins)
+    return [admin.id for admin in admin_list]
+
+
+@client.on(events.NewMessage(incoming=True))
+async def record_activity(event):
+    # Kontynuuj tylko, jeśli wiadomość zawiera multimedia i nie jest odpowiedzią
+    if not event.message.is_reply and event.media:
+        user_id = event.sender_id
+        username = event.sender.username or f"user{user_id}"
+
+        # Load the activity data from the file if it exists, otherwise create an empty dictionary
+        if os.path.exists('activity_data.json'):
+            with open('activity_data.json', 'r') as file:
+                try:
+                    data = json.load(file)
+                except json.JSONDecodeError:
+                    data = {}
+        else:
+            data = {}
+
+        # Update the activity data with the user's ID and last active time
+        data[str(user_id)] = {
+            "username": username,
+            "last_active": str(datetime.now()),
+            "user_id": user_id
+        }
+
+        # Write the updated data back to the file
+        try:
+            with open('activity_data.json', 'w') as file:
+                json.dump(data, file, indent=4)
+        except Exception as e:
+            print(f"Error writing to activity_data.json: {e}")
+
+
+@client.on(events.NewMessage(pattern=r'/showinactive (\d+) (h|d)'))
+@client.on(events.NewMessage(pattern=r'/kickinactive (\d+) (h|d)'))
+@client.on(events.NewMessage(pattern=r'/baninactive (\d+) (h|d)'))
 async def process_inactive(event):
     if not await is_user_admin(event.sender_id, event.chat_id):
         await event.respond("Tylko administratorzy mogą używać tej komendy.")
@@ -34,35 +72,43 @@ async def process_inactive(event):
 
     if days_or_hours == 'h':
         cutoff_date = datetime.now() - timedelta(hours=value)
-    else:  # 'd'
+    elif days_or_hours == 'd':  # Explicitly handling 'days'
         cutoff_date = datetime.now() - timedelta(days=value)
+    else:
+        await event.respond("Invalid time specifier. Use 'h' for hours or 'd' for days.")
+        return
 
-    with open('activity_data.json', 'r') as file:
-        data = json.load(file)
+    # Load activity data
+    if os.path.exists('activity_data.json'):
+        with open('activity_data.json', 'r') as file:
+            data = json.load(file)
+    else:
+        data = {}
 
-    all_members = [(member.username, member.id) for member in await client.get_participants(event.chat_id) if
+    all_members = [member.id for member in await client.get_participants(event.chat_id) if
                    not await is_user_admin(member.id, event.chat_id)]
-    active_members = [(user_data["username"], int(user_id)) for user_id, user_data in data.items() if
+    active_members = [int(user_id) for user_id, user_data in data.items() if
                       datetime.fromisoformat(user_data["last_active"]) > cutoff_date]
     inactive_users = set(all_members) - set(active_members)
 
     if event.pattern_match.string.startswith("/showinactive"):
-        msg_lines = [f"{username} (ID: {user_id})" for username, user_id in inactive_users if username]
-        await event.respond(f"Użytkownicy nieaktywni od {value} {days_or_hours}:\n" + "\n".join(msg_lines))
+        msg_lines = [f"Użytkownik ID: {user_id}" for user_id in inactive_users]
+        response_message = f"Użytkownicy nieaktywni od {value} {days_or_hours}:\n" + "\n".join(msg_lines) if msg_lines else "Brak nieaktywnych użytkowników."
+        await event.respond(response_message)
 
     elif event.pattern_match.string.startswith("/kickinactive"):
-        for _, user_id in inactive_users:
+        for user_id in inactive_users:
             try:
                 await client.kick_participant(event.chat_id, user_id)
             except Exception as e:
-                await event.respond(f"Nie mogę wyrzucić użytkownika o ID {user_id}: {str(e)}")
+                await event.respond(f"Nie mogę wyrzucić użytkownika ID {user_id}: {str(e)}")
 
     elif event.pattern_match.string.startswith("/baninactive"):
-        for _, user_id in inactive_users:
+        for user_id in inactive_users:
             try:
                 await client.edit_permissions(event.chat_id, user_id, view_messages=False)
             except Exception as e:
-                await event.respond(f"Nie mogę zbanować użytkownika o ID {user_id}: {str(e)}")
+                await event.respond(f"Nie mogę zbanować użytkownika ID {user_id}: {str(e)}")
 
 
 @client.on(events.NewMessage(pattern=r'/info'))
